@@ -1,0 +1,240 @@
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import precision_score, accuracy_score, classification_report
+from sklearn.inspection import permutation_importance
+import shap
+
+# Simulate labels: 1 for outperformer, 0 for underperformer (based on median)
+median_returns = returns.median(axis=1)
+labels = returns['RandomForest'] > median_returns
+features = returns[['Baseline', 'Logistic', 'DecisionTree']]  # proxy features for demonstration
+
+# Train-test split (80/20)
+split_idx = int(0.8 * len(features))
+X_train, X_test = features[:split_idx], features[split_idx:]
+y_train, y_test = labels[:split_idx], labels[split_idx:]
+
+# Fit RandomForestClassifier
+clf = RandomForestClassifier(n_estimators=100, max_depth=3, random_state=42)
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+
+# Evaluation
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred)
+
+# Classification report
+report = classification_report(y_test, y_pred, output_dict=True)
+report_df = pd.DataFrame(report).T
+
+# Feature importance via permutation
+perm_importance = permutation_importance(clf, X_test, y_test, n_repeats=10, random_state=42)
+perm_df = pd.DataFrame({
+    'Feature': features.columns,
+    'Importance Mean': perm_importance.importances_mean,
+    'Importance Std': perm_importance.importances_std
+}).sort_values(by='Importance Mean', ascending=False)
+
+# SHAP values for further interpretability
+explainer = shap.Explainer(clf, X_train)
+shap_values = explainer(X_test)
+
+# Display classification report and feature importance
+tools.display_dataframe_to_user(name="Classification Report", dataframe=report_df)
+tools.display_dataframe_to_user(name="Feature Importance (Permutation)", dataframe=perm_df)
+
+# SHAP summary plot
+shap.summary_plot(shap_values, X_test, show=False)
+plt.tight_layout()
+plt.savefig("/mnt/data/shap_summary_plot.png")
+plt.show()
+//
+
+import statsmodels.api as sm
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
+from sklearn.decomposition import PCA
+
+# Simulate Fama-French + momentum factors
+factors = pd.DataFrame({
+    'Mkt': np.random.normal(0.005, 0.02, n_months),
+    'SMB': np.random.normal(0.002, 0.015, n_months),
+    'HML': np.random.normal(0.0015, 0.014, n_months),
+    'RMW': np.random.normal(0.002, 0.013, n_months),
+    'CMA': np.random.normal(0.001, 0.012, n_months),
+    'UMD': np.random.normal(0.003, 0.018, n_months)
+}, index=returns.index)
+
+# Factor regression: excess returns (assuming 0 risk-free rate)
+excess_returns = returns.subtract(0)
+
+results = {}
+for col in excess_returns.columns:
+    X = sm.add_constant(factors)
+    y = excess_returns[col]
+    model = sm.OLS(y, X).fit()
+    results[col] = model
+
+# Extract alphas and t-stats
+regression_summary = pd.DataFrame({
+    "Alpha": [model.params['const'] * 12 for model in results.values()],
+    "t-stat": [model.tvalues['const'] for model in results.values()]
+}, index=results.keys())
+
+tools.display_dataframe_to_user(name="Factor Regression Summary", dataframe=regression_summary)
+
+# Confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=['Underperform', 'Outperform'])
+disp.plot(cmap='Blues')
+plt.title("Confusion Matrix - Random Forest Classifier")
+plt.tight_layout()
+plt.savefig("/mnt/data/confusion_matrix.png")
+plt.show()
+
+# ROC curve
+y_proba = clf.predict_proba(X_test)[:, 1]
+fpr, tpr, _ = roc_curve(y_test, y_proba)
+roc_auc = auc(fpr, tpr)
+plt.figure(figsize=(6, 4))
+plt.plot(fpr, tpr, label=f"ROC Curve (AUC = {roc_auc:.2f})")
+plt.plot([0, 1], [0, 1], linestyle='--')
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve - Random Forest Classifier")
+plt.legend(loc="lower right")
+plt.tight_layout()
+plt.savefig("/mnt/data/roc_curve.png")
+plt.show()
+
+# PCA visualization of strategies
+strategy_matrix = returns[['Logistic', 'DecisionTree', 'RandomForest']]
+pca = PCA(n_components=2)
+components = pca.fit_transform(strategy_matrix)
+
+pca_df = pd.DataFrame(components, columns=["PC1", "PC2"])
+pca_df['Year'] = strategy_matrix.index.year
+
+plt.figure(figsize=(8, 6))
+sns.scatterplot(data=pca_df, x="PC1", y="PC2", hue="Year", palette="coolwarm", s=50)
+plt.title("PCA of Strategy Returns (Logistic, Tree, Forest)")
+plt.tight_layout()
+plt.savefig("/mnt/data/pca_strategies.png")
+plt.show()
+//
+
+# Re-import required modules and recompute y_test and y_pred
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
+from sklearn.decomposition import PCA
+
+# Recreate labels for classification
+median_returns = returns.median(axis=1)
+labels = returns['RandomForest'] > median_returns
+features = returns[['Baseline', 'Logistic', 'DecisionTree']]
+
+# Re-split
+split_idx = int(0.8 * len(features))
+X_train, X_test = features[:split_idx], features[split_idx:]
+y_train, y_test = labels[:split_idx], labels[split_idx:]
+
+# Re-train classifier
+clf = RandomForestClassifier(n_estimators=100, max_depth=3, random_state=42)
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+
+# Confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=['Underperform', 'Outperform'])
+disp.plot(cmap='Blues')
+plt.title("Confusion Matrix - Random Forest Classifier")
+plt.tight_layout()
+plt.savefig("/mnt/data/confusion_matrix.png")
+plt.show()
+
+# ROC curve
+y_proba = clf.predict_proba(X_test)[:, 1]
+fpr, tpr, _ = roc_curve(y_test, y_proba)
+roc_auc = auc(fpr, tpr)
+plt.figure(figsize=(6, 4))
+plt.plot(fpr, tpr, label=f"ROC Curve (AUC = {roc_auc:.2f})")
+plt.plot([0, 1], [0, 1], linestyle='--')
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve - Random Forest Classifier")
+plt.legend(loc="lower right")
+plt.tight_layout()
+plt.savefig("/mnt/data/roc_curve.png")
+plt.show()
+
+# PCA of strategy returns
+strategy_matrix = returns[['Logistic', 'DecisionTree', 'RandomForest']]
+pca = PCA(n_components=2)
+components = pca.fit_transform(strategy_matrix)
+
+pca_df = pd.DataFrame(components, columns=["PC1", "PC2"])
+pca_df['Year'] = strategy_matrix.index.year
+
+plt.figure(figsize=(8, 6))
+sns.scatterplot(data=pca_df, x="PC1", y="PC2", hue="Year", palette="coolwarm", s=50)
+plt.title("PCA of Strategy Returns (Logistic, Tree, Forest)")
+plt.tight_layout()
+plt.savefig("/mnt/data/pca_strategies.png")
+plt.show()
+//
+# Re-import required modules and recompute y_test and y_pred
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
+from sklearn.decomposition import PCA
+
+# Recreate labels for classification
+median_returns = returns.median(axis=1)
+labels = returns['RandomForest'] > median_returns
+features = returns[['Baseline', 'Logistic', 'DecisionTree']]
+
+# Re-split
+split_idx = int(0.8 * len(features))
+X_train, X_test = features[:split_idx], features[split_idx:]
+y_train, y_test = labels[:split_idx], labels[split_idx:]
+
+# Re-train classifier
+clf = RandomForestClassifier(n_estimators=100, max_depth=3, random_state=42)
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+
+# Confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=['Underperform', 'Outperform'])
+disp.plot(cmap='Blues')
+plt.title("Confusion Matrix - Random Forest Classifier")
+plt.tight_layout()
+plt.savefig("/mnt/data/confusion_matrix.png")
+plt.show()
+
+# ROC curve
+y_proba = clf.predict_proba(X_test)[:, 1]
+fpr, tpr, _ = roc_curve(y_test, y_proba)
+roc_auc = auc(fpr, tpr)
+plt.figure(figsize=(6, 4))
+plt.plot(fpr, tpr, label=f"ROC Curve (AUC = {roc_auc:.2f})")
+plt.plot([0, 1], [0, 1], linestyle='--')
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve - Random Forest Classifier")
+plt.legend(loc="lower right")
+plt.tight_layout()
+plt.savefig("/mnt/data/roc_curve.png")
+plt.show()
+
+# PCA of strategy returns
+strategy_matrix = returns[['Logistic', 'DecisionTree', 'RandomForest']]
+pca = PCA(n_components=2)
+components = pca.fit_transform(strategy_matrix)
+
+pca_df = pd.DataFrame(components, columns=["PC1", "PC2"])
+pca_df['Year'] = strategy_matrix.index.year
+
+plt.figure(figsize=(8, 6))
+sns.scatterplot(data=pca_df, x="PC1", y="PC2", hue="Year", palette="coolwarm", s=50)
+plt.title("PCA of Strategy Returns (Logistic, Tree, Forest)")
+plt.tight_layout()
+plt.savefig("/mnt/data/pca_strategies.png")
+plt.show()
