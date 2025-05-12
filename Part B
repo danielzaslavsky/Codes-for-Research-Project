@@ -1,0 +1,210 @@
+import yfinance as yf
+ import pandas as pd
+ import numpy as np
+ from sklearn.ensemble import RandomForestClassifier
+ from sklearn.tree import DecisionTreeClassifier
+ from sklearn.linear_model import LogisticRegression
+ from sklearn.preprocessing import StandardScaler
+ import matplotlib.pyplot as plt
+ tickers = ['AAPL', 'MSFT', 'NVDA']  # Try fewer tickers to avoid rate limits
+ start_date = '2019-01-01'
+ end_date = '2024-01-01'
+ capital = 100000
+ transaction_cost = 0.0075
+ rolling_window = 36
+ # Download prices
+ try:
+    prices = yf.download(tickers, start=start_date, end=end_date, auto_adjust=True)['Adj Close'].resample('ME').last()
+ except Exception as e:
+    print(f"Error downloading data: {e}")
+    prices = pd.DataFrame()
+ # Proceed only if data was downloaded
+ if not prices.empty:
+    returns = prices.pct_change().dropna()
+    features = returns.rolling(3).mean().shift(1)
+    labels = returns.shift(-1)
+    results = []
+    for i in range(rolling_window, len(features) - 1):
+        X_train = features.iloc[i - rolling_window:i]
+        y_train = labels.iloc[i - rolling_window:i]
+        X_test = features.iloc[i:i + 1]
+        y_test = labels.iloc[i + 1:i + 2]
+        if X_train.isnull().values.any() or X_test.isnull().values.any():
+            continue
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        future_returns = y_train.iloc[-1]
+        top_thresh = future_returns.quantile(0.8)
+        bottom_thresh = future_returns.quantile(0.2)
+        y_binary = future_returns.apply(lambda r: 1 if r > top_thresh else (-1 if r < bottom_thresh else 0))
+        models = {
+            'LogReg': LogisticRegression(max_iter=1000),
+            'Tree': DecisionTreeClassifier(),
+            'Forest': RandomForestClassifier(n_estimators=100)
+        }
+        for model_name, model in models.items():
+            model.fit(X_train_scaled, y_binary)
+            preds = model.predict(X_test_scaled)[0]
+            test_returns = y_test.iloc[0]
+            long_stocks = future_returns[future_returns > top_thresh].index
+            short_stocks = future_returns[future_returns < bottom_thresh].index
+            long_ret = test_returns[long_stocks].mean() if len(long_stocks) > 0 else 0
+            short_ret = test_returns[short_stocks].mean() if len(short_stocks) > 0 else 0
+            gross_return = long_ret - short_ret
+            net_return = gross_return - transaction_cost
+            results.append({
+                'date': X_test.index[0],
+                'model': model_name,
+                'net_return': net_return
+            })
+    # Compile and plot
+    df_results = pd.DataFrame(results)
+    if not df_results.empty:
+        pivot = df_results.pivot(index='date', columns='model', values='net_return')
+        cumulative = (1 + pivot).cumprod() * capital
+ 5/4/25, 10:47 PM Untitled0.ipynb - Colab
+ https://colab.research.google.com/drive/1KduN_9sE-JSs383qU0M4zRNguvO-tI4m#scrollTo=U4jxo7pAVLMW&printMode=true 1/4
+        cumulative.plot(title='Cumulative Portfolio Value', figsize=(10, 5))
+        plt.ylabel('Capital ($)')
+        plt.grid(True)
+        plt.show()
+    else:
+        print("No results to display.")
+ else:
+    print("Data download failed. Try again later or use cached data.")
+ [*********************100%***********************]  3 of 3 completed
+ ERROR:yfinance:
+ 3 Failed downloads:
+ ERROR:yfinance:['NVDA', 'AAPL', 'MSFT']: YFRateLimitError('Too Many Requests. Rate limited. Try after a while.')
+ Data download failed. Try again later or use cached data.
+ dates = pd.date_range(start='2019-01-31', end='2024-01-31', freq='M')
+ np.random.seed(42)
+ returns = pd.DataFrame({
+    'AAPL': np.random.normal(0.01, 0.05, len(dates)),
+    'MSFT': np.random.normal(0.012, 0.04, len(dates)),
+    'NVDA': np.random.normal(0.015, 0.06, len(dates))
+ }, index=dates)
+ <ipython-input-3-4952a407f364>:1: FutureWarning: 'M' is deprecated and will be removed in a future version, please use 'ME' instead.
+  dates = pd.date_range(start='2019-01-31', end='2024-01-31', freq='M')
+ <ipython-input-9-48910e99d74c>:10: FutureWarning: 'M' is deprecated and will be removed in a future version, please use 'ME' instead.
+  dates = pd.date_range(start='2019-01-31', end='2024-01-31', freq='M')
+ /mnt/data/monthly returns with date.csv ' '
+  
+ # Recreate the synthetic returns DataFrame with proper 'Date' column label
+ import pandas as pd
+ import numpy as np
+ import os
+ # Ensure directory exists
+ os.makedirs("/mnt/data", exist_ok=True)
+ # Generate synthetic monthly return data
+ dates = pd.date_range(start='2019-01-31', end='2024-01-31', freq='M')
+ np.random.seed(42)
+ returns = pd.DataFrame({
+    'AAPL': np.random.normal(0.01, 0.05, len(dates)),
+    'MSFT': np.random.normal(0.012, 0.04, len(dates)),
+    'NVDA': np.random.normal(0.015, 0.06, len(dates))
+ }, index=dates)
+ # Reset index and name the date column
+ returns.reset_index(inplace=True)
+ returns.rename(columns={'index': 'Date'}, inplace=True)
+ # Save to CSV with 'Date' column
+ file_path = '/mnt/data/monthly_returns_with_date.csv'
+ returns.to_csv(file_path, index=False)
+ file_path
+ from google.colab import drive
+ drive.mount('/content/drive')
+ Drive already mounted at /content/drive; to attempt to forcibly remount, call drive.mount("/content/drive", force_remount=True).
+ import pandas as pd
+ # Load file using first column as index (likely unlabeled "Date")
+ file_path = '/content/drive/MyDrive/Colab Notebooks/monthly_returns.csv'
+ returns = pd.read_csv(file_path, index_col=0, parse_dates=True)
+ # Optional preview
+ print(returns.head())
+ 5/4/25, 10:47 PM Untitled0.ipynb - Colab
+ https://colab.research.google.com/drive/1KduN_9sE-JSs383qU0M4zRNguvO-tI4m#scrollTo=U4jxo7pAVLMW&printMode=true 2/4
+                AAPL      MSFT      NVDA
+ 2019-01-31  0.034836  0.004574  0.099168
+ 2019-02-28  0.003087 -0.032253 -0.069111
+ 2019-03-31  0.042384 -0.035848  0.050211
+ 2019-04-30  0.086151  0.044501  0.146427
+ 2019-05-31 -0.001708  0.066250 -0.044432
+ import pandas as pd
+ import numpy as np
+ from sklearn.ensemble import RandomForestClassifier
+ from sklearn.tree import DecisionTreeClassifier
+ from sklearn.linear_model import LogisticRegression
+ from sklearn.preprocessing import StandardScaler
+ import matplotlib.pyplot as plt
+ # Load the CSV file
+ file_path = '/mnt/data/monthly_returns_with_date.csv'
+ returns = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+ # Parameters
+ capital = 100000
+ transaction_cost = 0.0075
+ rolling_window = 36  # months
+ results = []
+ # Main backtest loop
+ for i in range(rolling_window, len(returns) - 1):
+    # Build training data: rows = stocks, columns = features (momentum)
+    X_train = []
+    y_train = []
+    for j in range(i - rolling_window, i):
+        month_returns = returns.iloc[j]
+        month_momentum = returns.iloc[j-3:j].mean() if j >= 3 else None
+        if month_momentum is not None:
+            for stock in returns.columns:
+                if not np.isnan(month_momentum[stock]) and not np.isnan(month_returns[stock]):
+                    X_train.append([month_momentum[stock]])
+                    y_train.append(1 if month_returns[stock] > month_returns.quantile(0.8) 
+                                   else -1 if month_returns[stock] < month_returns.quantile(0.2) else 0)
+    # Current test data
+    test_momentum = returns.iloc[i-3:i].mean()
+    future_returns = returns.iloc[i+1]
+    test_data = []
+    test_labels = []
+    stock_names = []
+    for stock in returns.columns:
+        if not np.isnan(test_momentum[stock]) and not np.isnan(future_returns[stock]):
+            test_data.append([test_momentum[stock]])
+            test_labels.append(future_returns[stock])
+            stock_names.append(stock)
+    if len(X_train) == 0 or len(test_data) == 0:
+        continue
+    # Standardize features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(test_data)
+    # Models
+    models = {
+        'LogReg': LogisticRegression(max_iter=1000),
+        'Tree': DecisionTreeClassifier(),
+        'Forest': RandomForestClassifier(n_estimators=100)
+    }
+    for model_name, model in models.items():
+        model.fit(X_train_scaled, y_train)
+        preds = model.predict(X_test_scaled)
+        df_pred = pd.DataFrame({'Stock': stock_names, 'Prediction': preds, 'Return': test_labels})
+        long_ret = df_pred[df_pred['Prediction'] == 1]['Return'].mean()
+        short_ret = df_pred[df_pred['Prediction'] == -1]['Return'].mean()
+        gross_return = (long_ret - short_ret) if not np.isnan(long_ret) and not np.isnan(short_ret) else 0
+ 5/4/25, 10:47 PM Untitled0.ipynb - Colab
+ https://colab.research.google.com/drive/1KduN_9sE-JSs383qU0M4zRNguvO-tI4m#scrollTo=U4jxo7pAVLMW&printMode=true 3/4
+        net_return = gross_return - transaction_cost
+        results.append({
+            'date': returns.index[i+1],
+            'model': model_name,
+            'net_return': net_return
+        })
+ # Compile results
+ df_results = pd.DataFrame(results)
+ if not df_results.empty:
+    pivot = df_results.pivot(index='date', columns='model', values='net_return')
+    cumulative = (1 + pivot).cumprod() * capital
+    # Plot
+    cumulative.plot(title='Cumulative Portfolio Value (Net of 75bps)', figsize=(10, 6))
+    plt.ylabel('Portfolio Value ($)')
+    plt.grid(True)
+    plt.show()
+ else:
+    print("No valid results to show."
