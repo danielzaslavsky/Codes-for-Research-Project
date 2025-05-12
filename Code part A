@@ -1,0 +1,418 @@
+date ticker sector pe_ratio momentum_12m roe accruals asset_growth fwd_return_1m
+ 0 2019-01-31 STK0001 Technology 17.483571 0.093087 0.182384 0.035230 0.072975-0.001707
+ 1 2019-01-31 STK0002 Industrials 22.896064 0.138372 0.126526 0.025426 0.066097-0.013286
+ 2 2019-01-31 STK0003 Healthcare 16.209811 0.004336 0.063754 0.014377 0.049615 0.025712
+ 3 2019-01-31 STK0004 Healthcare 10.459880 0.029385 0.223282 0.017742 0.082026-0.061237
+ 4 2019-01-31 STK0005 Technology 12.278086 0.105546 0.092450 0.023757 0.061981-0.004585
+ import pandas as pd
+ # Load Excel file from Google Drive
+ df = pd.read_excel("/content/drive/MyDrive/Colab Notebooks/simulated_anomaly_data_2019_2024_with_sectors.xlsx", parse_dates=["date"])
+ df.head()
+ import numpy as np
+ import matplotlib.pyplot as plt
+ from sklearn.preprocessing import StandardScaler
+ from sklearn.linear_model import LogisticRegression
+ from sklearn.tree import DecisionTreeClassifier
+ from sklearn.ensemble import RandomForestClassifier
+ # Define features and label
+ features = ['pe_ratio', 'momentum_12m', 'roe', 'accruals', 'asset_growth']
+ target = 'fwd_return_1m'
+ # Filter top/bottom 20% returns for classification
+ df['rank'] = df.groupby('date')[target].transform(
+    lambda x: pd.qcut(x, 5, labels=False, duplicates='drop'))
+ df = df[df['rank'].isin([0, 4])]
+ df['target'] = df['rank'].apply(lambda x: 1 if x == 4 else 0)
+ # Rolling training and testing function
+ def rolling_model(df, features, model_type='rf', window=6):
+    dates = sorted(df['date'].unique())
+    results = []
+    for i in range(window, len(dates) - 1):
+        train_dates = dates[i - window:i]
+        test_date = dates[i]
+        train = df[df['date'].isin(train_dates)]
+        test = df[df['date'] == test_date].copy()
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(train[features])
+        X_test = scaler.transform(test[features])
+        y_train = train['target']
+        if model_type == 'logit':
+            model = LogisticRegression(max_iter=1000)
+        elif model_type == 'tree':
+            model = DecisionTreeClassifier(max_depth=5)
+        elif model_type == 'rf':
+            model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+        model.fit(X_train, y_train)
+        test['pred'] = model.predict_proba(X_test)[:, 1]
+        results.append(test[['date', 'ticker', target, 'pred']])
+    return pd.concat(results)
+ # Backtest long-short performance
+ def backtest(pred_df, target_col, cost_bps=0.75):
+    pred_df['decile'] = pred_df.groupby('date')['pred'].transform(
+        lambda x: pd.qcut(x, 5, labels=False, duplicates='drop'))
+    long_r = pred_df[pred_df['decile'] == 4].groupby('date')[target_col].mean()
+    short_r = pred_df[pred_df['decile'] == 0].groupby('date')[target_col].mean()
+    ls_r = long_r - short_r - (cost_bps / 100)
+    cumulative = (1 + ls_r).cumprod()
+    sharpe = ls_r.mean() / ls_r.std() * np.sqrt(12)
+    cagr = cumulative.iloc[-1]**(12/len(cumulative)) - 1
+ max dd (cumulative / cumulative cummax() 1) min()
+ 5/4/25, 9:52 PM Code final.ipynb - Colab
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true 1/8
+    max_dd = (cumulative / cumulative.cummax() - 1).min()
+    return cumulative, ls_r, sharpe, cagr, max_dd
+ # Plot cumulative return chart
+ def plot_cumulative(series, title):
+    series.index = pd.to_datetime(series.index)
+    plt.figure(figsize=(10, 5))
+    plt.plot(series, label=title)
+    plt.title(f'Cumulative Return: {title}')
+    plt.xlabel('Date')
+    plt.ylabel('Portfolio Value')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+  
+ <ipython-input-2-881635580eba>:16: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+ Try using .loc[row_indexer,col_indexer] = value instead
+ See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-co
+  df['target'] = df['rank'].apply(lambda x: 1 if x == 4 else 0)
+ def backtest(pred_df, target_col, cost_bps=0.75):
+    pred_df['decile'] = pred_df.groupby('date')['pred'].transform(
+        lambda x: pd.qcut(x, 5, labels=False, duplicates='drop'))
+    long_returns = pred_df[pred_df['decile'] == 4].groupby('date')[target_col].mean()
+    short_returns = pred_df[pred_df['decile'] == 0].groupby('date')[target_col].mean()
+    # Clean returns: drop NaNs and ensure valid index
+    long_returns = long_returns.dropna()
+    short_returns = short_returns.dropna()
+    # Align indexes
+    aligned_index = long_returns.index.intersection(short_returns.index)
+    long_returns = long_returns.loc[aligned_index]
+    short_returns = short_returns.loc[aligned_index]
+    # Calculate long-short returns with transaction cost
+    ls_returns = long_returns - short_returns - (cost_bps / 100)
+    ls_returns = ls_returns.dropna()
+    cumulative = (1 + ls_returns).cumprod()
+    sharpe = ls_returns.mean() / ls_returns.std() * np.sqrt(12) if ls_returns.std() > 0 else np.nan
+    cagr = cumulative.iloc[-1]**(12/len(cumulative)) - 1 if len(cumulative) > 0 else np.nan
+    max_dd = (cumulative / cumulative.cummax() - 1).min() if len(cumulative) > 0 else np.nan
+    return cumulative, ls_returns, sharpe, cagr, max_dd
+ import pandas as pd
+ import numpy as np
+ import matplotlib.pyplot as plt
+ dates = pd.date_range(start="2020-01-01", periods=36, freq="M")
+ sample_returns = pd.Series(np.random.normal(0.01, 0.02, len(dates)), index=dates)
+ cumulative = (1 + sample_returns).cumprod()
+ def plot_cumulative(series, title):
+    if series.isnull().all():
+        print(f"No valid data to plot for {title}.")
+        return
+    series = series.dropna().sort_index()
+    plt.figure(figsize=(10, 5))
+    plt.plot(series, label=title)
+    plt.title(f'Cumulative Return: {title}')
+    plt.xlabel('Date')
+    plt.ylabel('Portfolio Value')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+ plot_cumulative(cumulative, "Sample Model")
+ 5/4/25, 9:52 PM Code final.ipynb - Colab
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true 2/8
+5/4/25, 9:52 PM
+ Code final.ipynb - Colab
+ <ipython-input-4-f7ac36bb5e01>:5: FutureWarning: 'M' is deprecated and will be removed in a future version, please use 'ME' instead.
+  dates = pd.date_range(start="2020-01-01", periods=36, freq="M")
+ 
+ !pip install --upgrade --force-reinstall scikit-learn xgboost --quiet
+ 
+ ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source 
+gensim 4.3.3 requires numpy<2.0,>=1.18.5, but you have numpy 2.2.5 which is incompatible.
+ gensim 4.3.3 requires scipy<1.14.0,>=1.7.0, but you have scipy 1.15.2 which is incompatible.
+ langchain 0.3.19 requires numpy<2,>=1.26.4; python_version < "3.12", but you have numpy 2.2.5 which is incompatible.
+ tensorflow 2.18.0 requires numpy<2.1.0,>=1.26.0, but you have numpy 2.2.5 which is incompatible.
+ thinc 8.2.5 requires numpy<2.0.0,>=1.19.0; python_version >= "3.9", but you have numpy 2.2.5 which is incompatible.
+ numba 0.60.0 requires numpy<2.1,>=1.22, but you have numpy 2.2.5 which is incompatible.
+ torch 2.5.1+cu124 requires nvidia-cublas-cu12==12.4.5.8; platform_system == "Linux" and platform_machine == "x86_64", but you have nvidi
+ torch 2.5.1+cu124 requires nvidia-cuda-cupti-cu12==12.4.127; platform_system == "Linux" and platform_machine == "x86_64", but you have n
+ torch 2.5.1+cu124 requires nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == "Linux" and platform_machine == "x86_64", but you have n
+ torch 2.5.1+cu124 requires nvidia-cuda-runtime-cu12==12.4.127; platform_system == "Linux" and platform_machine == "x86_64", but you have
+ torch 2.5.1+cu124 requires nvidia-cudnn-cu12==9.1.0.70; platform_system == "Linux" and platform_machine == "x86_64", but you have nvidia
+ torch 2.5.1+cu124 requires nvidia-cufft-cu12==11.2.1.3; platform_system == "Linux" and platform_machine == "x86_64", but you have nvidia
+ torch 2.5.1+cu124 requires nvidia-curand-cu12==10.3.5.147; platform_system == "Linux" and platform_machine == "x86_64", but you have nvi
+ torch 2.5.1+cu124 requires nvidia-cusolver-cu12==11.6.1.9; platform_system == "Linux" and platform_machine == "x86_64", but you have nvi
+ torch 2.5.1+cu124 requires nvidia-cusparse-cu12==12.3.1.170; platform_system == "Linux" and platform_machine == "x86_64", but you have n
+ torch 2.5.1+cu124 requires nvidia-nccl-cu12==2.21.5; platform_system == "Linux" and platform_machine == "x86_64", but you have nvidia-nc
+ torch 2.5.1+cu124 requires nvidia-nvjitlink-cu12==12.4.127; platform_system == "Linux" and platform_machine == "x86_64", but you have nv
+ pytensor 2.27.1 requires numpy<2,>=1.17.0, but you have numpy 2.2.5 which is incompatible.
+ 
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true
+ 
+ 3/8
+def rolling_model(df, features, model=None, window=6):
+    dates = sorted(df['date'].unique())
+    results = []
+    for i in range(window, len(dates) - 1):
+        train_dates = dates[i - window:i]
+        test_date = dates[i]
+        train = df[df['date'].isin(train_dates)]
+        test = df[df['date'] == test_date].copy()
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(train[features])
+        X_test = scaler.transform(test[features])
+        y_train = train['target']
+        # Clone a new model instance each time
+        from sklearn.base import clone
+        clf = clone(model)
+        clf.fit(X_train, y_train)
+        test['pred'] = clf.predict_proba(X_test)[:, 1]
+        results.append(test[['date', 'ticker', 'fwd_return_1m', 'pred']])
+    return pd.concat(results)--------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+ <ipython-input-7-a99da53e3f44> in <cell line: 0>()
+      1 metrics = {}
+      2 ----> 3 for name, model in model_constructors.items():
+      4     print(f"Running model: {name}")
+      5     pred_df = rolling_model(df, features, model=model)
+ NameError: name 'model_constructors' is not defined
+  
+ metrics = {}
+ for name, model in model_constructors.items():
+    print(f"Running model: {name}")
+    pred_df = rolling_model(df, features, model=model)
+    cumulative, ls_ret, sharpe, cagr, dd = backtest(pred_df, target)
+    plot_cumulative(cumulative, name)
+    metrics[name] = {"Sharpe": sharpe, "CAGR": cagr, "Max DD": dd}
+ import pandas as pd
+ # Load the anomaly dataset
+ df = pd.read_excel("/content/drive/MyDrive/Colab Notebooks/simulated_anomaly_data_2019_2024_with_sectors.xlsx", parse_dates=["date"])
+ features = ['pe_ratio', 'momentum_12m', 'roe', 'accruals', 'asset_growth']
+ target = 'fwd_return_1m'
+ # Rank and label targets for ML
+ # Keep only top and bottom 20% and safely assign target
+ df = df[df['rank'].isin([0, 4])].copy()
+ df.loc[:, 'target'] = df['rank'].apply(lambda x: 1 if x == 4 else 0)
+ from sklearn.preprocessing import StandardScaler
+ import pandas as pd
+ import numpy as np
+ import matplotlib.pyplot as plt
+ from sklearn.preprocessing import StandardScaler
+ from sklearn.linear_model import LogisticRegression
+ from sklearn.tree import DecisionTreeClassifier
+ 5/4/25, 9:52 PM Code final.ipynb - Colab
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true 4/8
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier,
+    AdaBoostClassifier
+ )
+ from sklearn.neighbors import KNeighborsClassifier
+ from sklearn.naive_bayes import GaussianNB
+ from sklearn.svm import SVC
+ from xgboost import XGBClassifier
+ metrics = {}
+ for name, model in model_constructors.items():
+    print(f"
+ 📊
+ Running model: {name}")
+    pred_df = rolling_model(df, features, model=model)
+    cumulative, ls_ret, sharpe, cagr, dd = backtest(pred_df, target)
+    plot_cumulative(cumulative, name)
+    metrics[name] = {"Sharpe": sharpe, "CAGR": cagr, "Max DD": dd}
+ from sklearn.linear_model import LogisticRegression
+ from sklearn.tree import DecisionTreeClassifier
+ from sklearn.ensemble import RandomForestClassifier
+ model_constructors = {
+    "LOGIT": LogisticRegression(max_iter=1000),
+    "TREE": DecisionTreeClassifier(max_depth=5),
+    "RF": RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+ }
+ metrics = {}
+ for name, model in model_constructors.items():
+    print(f"
+ 📊
+ Running model: {name}")
+    pred_df = rolling_model(df, features, model=model)
+    cumulative, ls_ret, sharpe, cagr, dd = backtest(pred_df, target)
+    plot_cumulative(cumulative, name)
+    metrics[name] = {"Sharpe": sharpe, "CAGR": cagr, "Max DD": dd}
+ # Create DataFrame from results
+ metric_df = pd.DataFrame(metrics).T
+ # Plot comparison
+ metric_df.plot(kind='bar', figsize=(10, 6))
+ plt.title("Comparison: Logistic Regression, Decision Tree, Random Forest")
+ plt.ylabel("Performance Metrics")
+ plt.grid(True)
+ plt.xticks(rotation=0)
+ plt.tight_layout()
+ plt.show()
+ from sklearn.ensemble import GradientBoostingClassifier, AdaBoostClassifier
+ from xgboost import XGBClassifier
+ from sklearn.neighbors import KNeighborsClassifier
+ from sklearn.naive_bayes import GaussianNB
+ from sklearn.svm import SVC
+ # Extend model dictionary
+ more_models = {
+    "GB": GradientBoostingClassifier(n_estimators=100, max_depth=3),
+    "ADA": AdaBoostClassifier(n_estimators=100),
+    "XGB": XGBClassifier(use_label_encoder=False, eval_metric='logloss'),
+    "KNN": KNeighborsClassifier(n_neighbors=5),
+    "NB": GaussianNB(),
+    "SVM": SVC(probability=True)
+ }
+ 5/4/25, 9:52 PM Code final.ipynb - Colab
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true 5/8
+5/4/25, 9:52 PM
+ Code final.ipynb - Colab
+ for name, model in more_models.items():
+ print(f"
+ 📊
+ Running model: {name}")
+ pred_df = rolling_model(df, features, model=model)
+ cumulative, ls_ret, sharpe, cagr, dd = backtest(pred_df, target)
+ plot_cumulative(cumulative, name)
+ metrics[name] = {"Sharpe": sharpe, "CAGR": cagr, "Max DD": dd}
+ import pandas as pd
+ import matplotlib.pyplot as plt
+ metric_df = pd.DataFrame(metrics).T
+ metric_df.plot(kind='bar', figsize=(12, 6))
+ plt.title("Performance Comparison: All Models")
+ plt.ylabel("Metric Value")
+ plt.xticks(rotation=0)
+ plt.grid(True)
+ plt.tight_layout()
+ plt.show()
+ import numpy as np
+ import matplotlib.pyplot as plt
+ # Generate 2D synthetic data
+ np.random.seed(42)
+ x1 = np.random.normal(loc=1, scale=1.0, size=500)
+ x2 = np.random.normal(loc=4, scale=1.0, size=500)
+ # Select a single "outlier" point
+ outlier = [3.1, 2.8]
+ # Plot
+ plt.figure(figsize=(8, 5))
+ plt.scatter(x1, x2, alpha=0.6)
+ plt.scatter(outlier[0], outlier[1], color='red', s=80, label="Point to be isolated")
+ # Draw isolation lines (simulating tree splits)
+ plt.axvline(x=outlier[0], color='red')
+ plt.axhline(y=outlier[1], color='red')
+ plt.xlabel("Feature 1")
+ plt.ylabel("Feature 2")
+ plt.title("Point to be isolated")
+ plt.legend()
+ plt.grid(True)
+ plt.show()
+ import numpy as np
+ import pandas as pd
+ import matplotlib.pyplot as plt
+ import seaborn as sns
+ from sklearn.ensemble import IsolationForest
+ # For nice styling
+ sns.set(style="darkgrid")
+ # Generate synthetic data
+ np.random.seed(42)
+ data = np.random.normal(loc=0, scale=1, size=(100000, 3))  # 100k samples, 3 features
+ df = pd.DataFrame(data, columns=['f1', 'f2', 'f3'])
+ # Fit Isolation Forest
+ model = IsolationForest(n_estimators=100, contamination=0.01)
+ model.fit(df)
+ # Compute anomaly scores
+ scores = model.decision_function(df)  # higher = more normal
+ anomaly_scores = -scores              
+# Plot histogram
+ plt.figure(figsize=(12, 6))
+ # lower = more anomalous
+ sns.histplot(anomaly_scores, bins=50, kde=False)
+ plt.title("Distribution of Anomaly Scores")
+ 6/8
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true
+5/4/25, 9:52 PM
+ Code final.ipynb - Colab
+ plt.xlabel("Anomaly score")
+ plt.ylabel("Number of transactions")
+ plt.show()
+ !pip install shap --quiet
+ ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source 
+gensim 4.3.3 requires numpy<2.0,>=1.18.5, but you have numpy 2.0.2 which is incompatible.
+ gensim 4.3.3 requires scipy<1.14.0,>=1.7.0, but you have scipy 1.15.2 which is incompatible.
+ langchain 0.3.19 requires numpy<2,>=1.26.4; python_version < "3.12", but you have numpy 2.0.2 which is incompatible.
+ thinc 8.2.5 requires numpy<2.0.0,>=1.19.0; python_version >= "3.9", but you have numpy 2.0.2 which is incompatible.
+ pytensor 2.27.1 requires numpy<2,>=1.17.0, but you have numpy 2.0.2 which is incompatible.
+ 
+ import shap
+ import xgboost as xgb
+ import pandas as pd
+ import numpy as np
+ import matplotlib.pyplot as plt
+ import seaborn as sns
+ from sklearn.model_selection import train_test_split
+ # Generate sample data
+ np.random.seed(42)
+ df = pd.DataFrame({
+ "hour": np.random.randint(0, 24, 1000),
+ "amount": np.random.exponential(100, 1000),
+ "PAYMENT": np.random.choice([0, 1], 1000)
+ })
+ # Features & target
+ X = df[["hour", "amount"]]
+ y = df["PAYMENT"]
+ # Train an XGBoost model
+ model = xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+ model.fit(X, y)
+ # Create SHAP explainer
+ explainer = shap.Explainer(model, X)
+ shap_values = explainer(X)
+ # Plot SHAP dependence for 'hour'
+ shap.dependence_plot("hour", shap_values.values, X, interaction_index="PAYMENT")
+ /usr/local/lib/python3.11/dist-packages/xgboost/training.py:183: UserWarning: [01:29:44] WARNING: /workspace/src/learner.cc:738: 
+Parameters: { "use_label_encoder" } are not used.
+  bst.update(dtrain, iteration=i, fobj=obj)--------------------------------------------------------------------------
+ValueError
+                                Traceback (most recent call last)
+ <ipython-input-10-2466133fb601> in <cell line: 0>()
+     28 
+     29 
+# Plot SHAP dependence for 'hour'---> 30 shap.dependence_plot("hour", shap_values.values, X, interaction_index="PAYMENT")
+ 
+ 1 frames
+ /usr/local/lib/python3.11/dist-packages/shap/utils/_general.py in convert_name(ind, shap_values, input_names)
+     44                 
+return "sum()"
+     45             ---> 46                 
+     47         
+     48             
+else:
+ raise ValueError("Could not find feature named: " + ind)
+ else:
+ return nzinds[0]
+ ValueError: Could not find feature named: PAYMENT
+ 
+ import shap
+ import xgboost as xgb
+ import pandas as pd
+ import numpy as np
+ import matplotlib.pyplot as plt
+ # Create a sample dataset
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true
+ 
+ 7/8
+5/4/25, 9:52 PM
+ Code final.ipynb - Colab
+ df = pd.DataFrame({
+ "hour": np.random.randint(0, 24, 1000),
+ "amount": np.random.exponential(100, 1000),
+ "PAYMENT": np.random.choice([0, 1], 1000)
+ })
+ X = df[["hour", "amount"]]
+ y = df["PAYMENT"]
+ # Train model
+ model = xgb.XGBClassifier(eval_metric='logloss')
+ model.fit(X, y)
+ # Explain predictions
+ explainer = shap.Explainer(model, X)
+ shap_values = explainer(X)
+ # Dependence plot for "hour" vs SHAP value, colored by "amount"
+ shap.dependence_plot("hour", shap_values.values, X, interaction_index="amount")
+ 8/8
+ https://colab.research.google.com/drive/1ODgKTv3yLr80zuA_-aCtb5Ft5_Uoa5Nt#printMode=true
