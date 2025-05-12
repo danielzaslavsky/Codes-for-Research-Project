@@ -1,0 +1,56 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Set seed for reproducibility
+np.random.seed(42)
+
+# Create a sample DataFrame mimicking strategy returns from 2019–2024
+dates = pd.date_range(start="2019-01-31", end="2024-12-31", freq="M")
+n_months = len(dates)
+
+# Generate synthetic returns (in decimal format) for each strategy
+returns = pd.DataFrame({
+    "Date": dates,
+    "Baseline": np.random.normal(0.0065, 0.04, n_months),
+    "Logistic": np.random.normal(0.0105, 0.037, n_months),
+    "DecisionTree": np.random.normal(0.012, 0.037, n_months),
+    "RandomForest": np.random.normal(0.015, 0.038, n_months)
+})
+
+returns.set_index("Date", inplace=True)
+
+# Calculate cumulative returns
+cumulative = (1 + returns).cumprod()
+
+# Calculate summary statistics
+summary_stats = returns.aggregate(['mean', 'std']).T
+summary_stats['Annual Return (%)'] = (1 + summary_stats['mean'])**12 - 1
+summary_stats['Volatility (%)'] = summary_stats['std'] * np.sqrt(12)
+summary_stats['Sharpe Ratio'] = summary_stats['mean'] / summary_stats['std'] * np.sqrt(12)
+
+# Create drawdown function
+def calculate_max_drawdown(series):
+    cumulative = (1 + series).cumprod()
+    peak = cumulative.cummax()
+    drawdown = (cumulative - peak) / peak
+    return drawdown.min()
+
+summary_stats['Max Drawdown (%)'] = returns.apply(calculate_max_drawdown).values * 100
+
+# Display as table
+import ace_tools as tools; tools.display_dataframe_to_user(name="Strategy Summary Statistics", dataframe=summary_stats)
+
+# Plot cumulative return graph
+plt.figure(figsize=(12, 6))
+for column in cumulative.columns:
+    plt.plot(cumulative.index, cumulative[column], label=column)
+plt.title("Cumulative Returns (2019–2024)")
+plt.xlabel("Date")
+plt.ylabel("Portfolio Value (Growth of $1)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("/mnt/data/cumulative_returns.png")
+plt.show()
